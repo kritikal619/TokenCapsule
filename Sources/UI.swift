@@ -11,7 +11,8 @@ final class Settings: ObservableObject {
     @Published var showMode: ShowMode { didSet { d.set(showMode.rawValue, forKey: "showMode") } }
     @Published var showModelSpeed: Bool { didSet { d.set(showModelSpeed, forKey: "showModelSpeed") } }
     @Published var showGenerationSpeed: Bool { didSet { d.set(showGenerationSpeed, forKey: "showGenerationSpeed") } }
-    @Published var hidden: Bool { didSet { d.set(hidden, forKey: "hidden") } }
+    /// Floating capsule on the screen. Off by default; the menu-bar panel is the main view.
+    @Published var floating: Bool { didSet { d.set(floating, forKey: "floating") } }
     /// One row per model used recently (default) instead of only the latest turn.
     @Published var perSource: Bool { didSet { d.set(perSource, forKey: "perSource") } }
 
@@ -19,7 +20,7 @@ final class Settings: ObservableObject {
         showMode = ShowMode(rawValue: d.string(forKey: "showMode") ?? "") ?? .whenActive
         showModelSpeed = d.object(forKey: "showModelSpeed") as? Bool ?? true
         showGenerationSpeed = d.object(forKey: "showGenerationSpeed") as? Bool ?? true
-        hidden = d.bool(forKey: "hidden")
+        floating = d.bool(forKey: "floating")
         perSource = d.object(forKey: "perSource") as? Bool ?? true
     }
 }
@@ -121,24 +122,14 @@ final class PanelState: ObservableObject {
     @Published var mode: PanelMode = .capsule
 }
 
-struct CapsuleView: View {
+/// Latest turn per model (or only the latest turn), shared by the popover and the floating capsule.
+struct TurnRowsView: View {
     @ObservedObject var store: Store
     @ObservedObject var settings: Settings
-    @ObservedObject var state: PanelState
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            capsule
-            if state.mode == .detail, let t = store.turns.first { DetailView(turn: t).transition(.opacity) }
-            if state.mode == .recent { RecentView(store: store).transition(.opacity) }
-        }
-        .padding(8)
-        .fixedSize()
-    }
-
-    /// Turns shown in the capsule: the latest overall, plus (per-source mode) the latest
-    /// turn of every other model used in the last 15 minutes, newest first.
-    private var shownTurns: [Turn] {
+    /// The latest overall, plus (per-source mode) the latest turn of every other model
+    /// used in the last 15 minutes, newest first.
+    static func shown(_ store: Store, _ settings: Settings) -> [Turn] {
         guard let latest = store.turns.first else { return [] }
         guard settings.perSource else { return [latest] }
         let recent = Date().addingTimeInterval(-15 * 60)
@@ -147,9 +138,9 @@ struct CapsuleView: View {
             .sorted { $0.end > $1.end }
     }
 
-    private var capsule: some View {
-        let turns = shownTurns
-        return VStack(alignment: .leading, spacing: 6) {
+    var body: some View {
+        let turns = Self.shown(store, settings)
+        VStack(alignment: .leading, spacing: 6) {
             if turns.isEmpty {
                 HStack(spacing: 10) {
                     Circle().fill(Color.gray).frame(width: 8, height: 8)
@@ -161,13 +152,6 @@ struct CapsuleView: View {
                 turnRow(t, nameWidth: turns.count > 1 ? 62 : nil)
             }
         }
-        .padding(.horizontal, 14).padding(.vertical, 8)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: turns.count > 1 ? 16 : 22))
-        .overlay(RoundedRectangle(cornerRadius: turns.count > 1 ? 16 : 22).strokeBorder(Color.primary.opacity(0.12)))
-        .shadow(color: .black.opacity(0.18), radius: 6, y: 2)
-        .contentShape(Rectangle())
-        .onTapGesture { withAnimation(.easeOut(duration: 0.15)) { state.mode = state.mode == .detail ? .capsule : .detail } }
-        .help("클릭: 마지막 턴 자세히 · Ctrl을 누른 채 올리기: 최근 기록·주간 사용량")
     }
 
     private func turnRow(_ t: Turn, nameWidth: CGFloat?) -> some View {
@@ -198,6 +182,80 @@ struct CapsuleView: View {
             Text(name).font(.system(size: 10)).foregroundStyle(.secondary)
             Text(Fmt.speed(v)).font(.system(size: 11, weight: .medium)).monospacedDigit()
         }
+    }
+}
+
+/// Optional floating capsule (click: detail, Ctrl+hover: weekly and recent).
+struct CapsuleView: View {
+    @ObservedObject var store: Store
+    @ObservedObject var settings: Settings
+    @ObservedObject var state: PanelState
+
+    var body: some View {
+        let multi = TurnRowsView.shown(store, settings).count > 1
+        VStack(alignment: .leading, spacing: 8) {
+            TurnRowsView(store: store, settings: settings)
+                .padding(.horizontal, 14).padding(.vertical, 8)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: multi ? 16 : 22))
+                .overlay(RoundedRectangle(cornerRadius: multi ? 16 : 22).strokeBorder(Color.primary.opacity(0.12)))
+                .shadow(color: .black.opacity(0.18), radius: 6, y: 2)
+                .contentShape(Rectangle())
+                .onTapGesture { withAnimation(.easeOut(duration: 0.15)) { state.mode = state.mode == .detail ? .capsule : .detail } }
+                .help("클릭: 마지막 턴 자세히 · Ctrl을 누른 채 올리기: 최근 기록·주간 사용량")
+            if state.mode == .detail, let t = store.turns.first { DetailView(turn: t).transition(.opacity) }
+            if state.mode == .recent { RecentView(store: store).transition(.opacity) }
+        }
+        .padding(8)
+        .fixedSize()
+    }
+}
+
+/// Panel opened from the menu-bar icon.
+struct PopoverView: View {
+    enum Tab: Hashable { case turn, week }
+    @ObservedObject var store: Store
+    @ObservedObject var settings: Settings
+    @State var tab: Tab = .turn
+    var openSettings: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("TokenCapsule").font(.system(size: 13, weight: .bold))
+                Spacer()
+                Image(systemName: "gearshape").font(.system(size: 13)).foregroundStyle(.secondary)
+                    .padding(4).contentShape(Rectangle()).onTapGesture(perform: openSettings).help("설정")
+            }
+            TurnRowsView(store: store, settings: settings)
+                .padding(12)
+                .frame(width: 300, alignment: .leading)
+                .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
+            // Drawn in SwiftUI (not NSSegmentedControl) so it also renders offscreen.
+            HStack(spacing: 2) {
+                segment("이번 턴", .turn)
+                segment("주간·기록", .week)
+            }
+            .padding(2)
+            .frame(width: 300)
+            .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+            if tab == .turn {
+                if let t = store.turns.first { DetailView(turn: t) }
+                else { Text("아직 기록이 없습니다.").font(.system(size: 12)).foregroundStyle(.secondary) }
+            } else {
+                RecentView(store: store)
+            }
+        }
+        .padding(12)
+        .fixedSize()
+    }
+
+    private func segment(_ title: String, _ value: Tab) -> some View {
+        Text(title)
+            .font(.system(size: 12, weight: tab == value ? .semibold : .regular))
+            .frame(maxWidth: .infinity).padding(.vertical, 4)
+            .background(tab == value ? Color.primary.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 6))
+            .contentShape(Rectangle())
+            .onTapGesture { tab = value }
     }
 }
 
@@ -395,7 +453,7 @@ final class OverlayController {
 
     private func updateVisibility() {
         let show: Bool
-        if settings.hidden { show = false }
+        if !settings.floating { show = false }
         else if settings.showMode == .always { show = true }
         else {
             let ids: Set<String> = ["com.anthropic.claudefordesktop", "com.openai.codex", "com.qoder.ide"]
@@ -415,6 +473,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let settings = Settings()
     var overlay: OverlayController!
     var statusItem: NSStatusItem!
+    let popover = NSPopover()
+    let settingsMenu = NSMenu()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         store.start()
@@ -422,10 +482,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.image = NSImage(systemSymbolName: "gauge.with.dots.needle.50percent", accessibilityDescription: "TokenCapsule")
         statusItem.button?.imagePosition = .imageLeading
-        let menu = NSMenu()
-        menu.delegate = self
-        statusItem.menu = menu
+        statusItem.button?.target = self
+        statusItem.button?.action = #selector(statusClicked)
+        statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        settingsMenu.delegate = self
+        let host = NSHostingController(rootView: PopoverView(store: store, settings: settings) { [weak self] in self?.showSettings() })
+        host.sizingOptions = [.preferredContentSize]
+        popover.contentViewController = host
+        popover.behavior = .transient
+        popover.animates = true
         Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.updateTitle() }
+    }
+
+    /// Left click: panel. Right click (or Ctrl-click): settings menu.
+    @objc func statusClicked() {
+        let event = NSApp.currentEvent
+        if event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true { showSettings(); return }
+        if popover.isShown { popover.performClose(nil); return }
+        guard let button = statusItem.button else { return }
+        store.refresh()
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        popover.contentViewController?.view.window?.makeKey()
+    }
+
+    func showSettings() {
+        popover.performClose(nil)
+        statusItem.menu = settingsMenu
+        statusItem.button?.performClick(nil)
+        statusItem.menu = nil
     }
 
     private func updateTitle() {
@@ -446,9 +530,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         info(menu, "DeepSeek(Qoder) 최근 7일 \(Fmt.tokens(store.deepseekWeek.total)) 토큰")
         menu.addItem(.separator())
 
-        add(menu, settings.hidden ? "캡슐 보이기" : "캡슐 숨기기", #selector(toggleHidden))
-        let always = add(menu, "항상 표시", #selector(setAlways)); always.state = settings.showMode == .always ? .on : .off
-        let active = add(menu, "Claude·Codex 사용 중일 때만 표시", #selector(setActive)); active.state = settings.showMode == .whenActive ? .on : .off
+        let float = add(menu, "화면 위 캡슐 띄우기", #selector(toggleFloating)); float.state = settings.floating ? .on : .off
+        if settings.floating {
+            let always = add(menu, "    항상 표시", #selector(setAlways)); always.state = settings.showMode == .always ? .on : .off
+            let active = add(menu, "    Claude·Codex·Qoder 사용 중일 때만", #selector(setActive)); active.state = settings.showMode == .whenActive ? .on : .off
+            add(menu, "    캡슐 위치 초기화", #selector(resetPosition))
+        }
         menu.addItem(.separator())
         let per = add(menu, "모델별로 보기 (최근 15분)", #selector(setPerSource)); per.state = settings.perSource ? .on : .off
         let single = add(menu, "최근 턴 하나만 보기", #selector(setSingle)); single.state = settings.perSource ? .off : .on
@@ -457,10 +544,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let g = add(menu, "생성 속도 줄 표시", #selector(toggleGen)); g.state = settings.showGenerationSpeed ? .on : .off
         menu.addItem(.separator())
         let login = add(menu, "로그인 시 자동 실행", #selector(toggleLogin)); login.state = SMAppService.mainApp.status == .enabled ? .on : .off
-        add(menu, "캡슐 위치 초기화", #selector(resetPosition))
         add(menu, "지금 새로 읽기", #selector(refresh))
         menu.addItem(.separator())
-        info(menu, "클릭: 이번 턴 자세히 · Ctrl+올리기: 최근 기록")
+        info(menu, "아이콘 클릭: 패널 열기 · 우클릭: 이 설정")
         add(menu, "TokenCapsule 종료", #selector(quit)).keyEquivalent = "q"
     }
 
@@ -471,9 +557,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let item = NSMenuItem(title: title, action: sel, keyEquivalent: ""); item.target = self; menu.addItem(item); return item
     }
 
-    @objc func toggleHidden() { settings.hidden.toggle() }
-    @objc func setAlways() { settings.showMode = .always; settings.hidden = false }
-    @objc func setActive() { settings.showMode = .whenActive; settings.hidden = false }
+    @objc func toggleFloating() { settings.floating.toggle() }
+    @objc func setAlways() { settings.showMode = .always }
+    @objc func setActive() { settings.showMode = .whenActive }
     @objc func toggleModel() { settings.showModelSpeed.toggle() }
     @objc func setPerSource() { settings.perSource = true }
     @objc func setSingle() { settings.perSource = false }

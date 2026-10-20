@@ -61,4 +61,8 @@ MainActor.assumeIsolated {
         render(CapsuleView(store: store, settings: settings, state: st), name + "-dark", dark: true, out: out)
         render(CapsuleView(store: store, settings: settings, state: st), name + "-light", dark: false, out: out)
     }
+    for (tab, name) in [(PopoverView.Tab.turn, "panel-turn"), (.week, "panel-week")] {
+        render(PopoverView(store: store, settings: settings, tab: tab) {}.background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)), name + "-dark", dark: true, out: out)
+        render(PopoverView(store: store, settings: settings, tab: tab) {}.background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)), name + "-light", dark: false, out: out)
+    }
 }

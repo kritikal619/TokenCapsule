@@ -1,31 +1,30 @@
 # TokenCapsule
 
-macOS 메뉴 막대 앱. Claude Code, Codex, DeepSeek(Qoder)의 **마지막 턴 토큰·시간·속도**를 화면 위 작은 캡슐로 보여 준다.
+macOS 메뉴 막대(상단바) 앱. Claude Code, Codex, DeepSeek(Qoder)의 **마지막 턴 토큰·시간·속도**와 주간 사용량을 상단바 아이콘 하나로 보여 준다.
 
 > A macOS menu-bar overlay that shows per-turn token usage, duration and output speed for Claude Code, Codex and DeepSeek (Qoder), plus Codex 5-hour/weekly limits. It reads local log files only — no network, no conversation text.
 
-<p align="center">
-  <img src="docs/images/capsule-dark.png" width="360" alt="캡슐: 모델별 마지막 턴">
-</p>
-
-| 캡슐 클릭: 이번 턴 자세히 | Ctrl + 올리기: 주간 사용량·최근 턴 |
+| 상단바 아이콘 클릭: 이번 턴 | 주간·기록 탭 |
 |---|---|
-| <img src="docs/images/detail-light.png" width="360" alt="이번 턴 상세"> | <img src="docs/images/recent-dark.png" width="360" alt="주간 사용량과 최근 턴"> |
+| <img src="docs/images/panel-turn-dark.png" width="360" alt="상단바 패널: 이번 턴"> | <img src="docs/images/panel-week-dark.png" width="360" alt="상단바 패널: 주간 사용량과 최근 턴"> |
 
 <sub>스크린샷은 데모 데이터다.</sub>
 
 ## 기능
 
-- **캡슐**: 마지막 턴의 합계 토큰, 걸린 시간, 모델 속도, 생성 속도를 보여 준다. 여러 모델을 함께 쓰면 최근 15분 안에 쓴 모델마다 한 줄씩 표시한다.
-- **클릭**: 마지막 턴의 입력(새로·캐시 읽기·캐시 쓰기), 출력, 생각 토큰과 첫 토큰까지·도구 실행 시간을 펼친다.
-- **Ctrl을 누른 채 마우스 올리기**: 아래 두 가지가 나온다.
-  - 주간 사용량: Codex 5시간·주간 한도 %와 초기화까지 남은 시간, Claude 7일·오늘 토큰, Codex·DeepSeek 7일 토큰.
-  - 최근 턴 8개.
-- **메뉴 막대 아이콘**: 아래 설정을 바꿀 수 있다.
-  - 표시 시점: 항상 표시 / Claude·Codex·Qoder 앱 사용 중일 때만
-  - 보기 방식: 모델별로 보기 / 최근 턴 하나만
-  - 속도 줄 켜기·끄기, 로그인 시 자동 실행, 위치 초기화
-- 캡슐은 드래그해서 옮길 수 있고 위치를 기억한다. 모든 Space와 전체 화면 위에 뜬다.
+- **상단바 아이콘**: 마지막 턴의 토큰 수가 아이콘 옆에 표시된다.
+- **아이콘 클릭 → 패널**:
+  - 위쪽: 모델별 마지막 턴. 최근 15분 안에 쓴 모델마다 한 줄씩 합계 토큰, 걸린 시간, 모델·생성 속도를 보여 준다.
+  - **이번 턴** 탭: 입력(새로·캐시 읽기·캐시 쓰기), 출력, 생각 토큰과 첫 토큰까지·도구 실행 시간.
+  - **주간·기록** 탭: Codex 5시간·주간 한도 %와 초기화까지 남은 시간, Claude 7일·오늘 토큰, Codex·DeepSeek 7일 토큰, 최근 턴 8개.
+- **우클릭(또는 패널의 ⚙︎) → 설정**:
+  - 모델별로 보기 / 최근 턴 하나만 보기
+  - 모델·생성 속도 줄 켜기·끄기
+  - 로그인 시 자동 실행
+  - 화면 위 캡슐 띄우기(선택)
+- **화면 위 캡슐(선택, 기본 꺼짐)**: TokenOverlay처럼 화면 위에 작은 캡슐을 띄운다. 클릭하면 이번 턴이, Ctrl을 누른 채 올리면 주간 사용량이 펼쳐진다. 드래그로 옮길 수 있다. 항상 표시하거나 Claude·Codex·Qoder 앱 사용 중일 때만 표시할 수 있다.
+
+<p align="center"><img src="docs/images/capsule-dark.png" width="340" alt="화면 위 캡슐(선택)"></p>
 
 ## 속도 두 가지
 
