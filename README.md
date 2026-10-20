@@ -1,38 +1,115 @@
 # TokenCapsule
 
-macOS용 토큰 오버레이. [TokenOverlay](https://github.com/igayowai/TokenOverlay)(Windows)와 비슷하게 Claude·Codex·DeepSeek(Qoder)의 마지막 턴 토큰·시간·속도를 화면 위 캡슐로 보여 준다.
+macOS 메뉴 막대 앱. Claude Code, Codex, DeepSeek(Qoder)의 **마지막 턴 토큰·시간·속도**를 화면 위 작은 캡슐로 보여 준다.
 
-- 캡슐: 마지막 턴의 합계 토큰, 걸린 시간, 모델 속도(도구 실행 제외), 생성 속도(첫 토큰 대기 제외)
-- 여러 모델을 함께 쓸 때: 기본은 최근 15분 안에 쓴 모델마다 한 줄씩 표시. 메뉴에서 "최근 턴 하나만 보기"로 바꿀 수 있다.
-- 캡슐 클릭: 이번 턴 입력/캐시/출력/생각 토큰과 시간 내역
-- Ctrl을 누른 채 캡슐 위에 마우스: 최근 턴 8개와 주간 사용량(Codex 5시간·주간 한도 %, Claude 7일·오늘 토큰)
-- 메뉴 막대 아이콘: 표시 방식(항상 / Claude·Codex·Qoder 사용 중일 때), 모델별·하나만 보기, 속도 줄 표시, 로그인 시 자동 실행, 위치 초기화
-- 캡슐은 드래그로 옮길 수 있고 위치를 기억한다.
+> A macOS menu-bar overlay that shows per-turn token usage, duration and output speed for Claude Code, Codex and DeepSeek (Qoder), plus Codex 5-hour/weekly limits. It reads local log files only — no network, no conversation text.
 
-## 데이터
+<p align="center">
+  <img src="docs/images/capsule-dark.png" width="360" alt="캡슐: 모델별 마지막 턴">
+</p>
 
-로컬 로그만 읽는다. 외부 전송 없음. 대화 내용·도구 입력/출력·답변 텍스트는 읽지 않고, 숫자 사용량·시각·ID만 쓴다.
+| 캡슐 클릭: 이번 턴 자세히 | Ctrl + 올리기: 주간 사용량·최근 턴 |
+|---|---|
+| <img src="docs/images/detail-light.png" width="360" alt="이번 턴 상세"> | <img src="docs/images/recent-dark.png" width="360" alt="주간 사용량과 최근 턴"> |
 
-- Claude Code: `~/.claude/projects/**/*.jsonl` (assistant 메시지의 usage, 같은 메시지 id는 중복 제거)
-- Codex: `~/.codex/sessions/**/rollout-*.jsonl` (`token_usage_record`, `task_complete`의 duration/첫 토큰, `token_count`의 rate_limits)
-- DeepSeek(Qoder 워커): `~/.codex/skills/qoder-delegate/usage.jsonl` — qoder-delegate 브리지가 호출마다 숫자만 남기는 기록. 토큰 0인 호출(대기열·취소)은 제외
-- DeepSeek(Qoder CLI 직접 사용): `~/.qoder/projects/**/*.jsonl` (Claude Code와 같은 형식)
+<sub>스크린샷은 데모 데이터다.</sub>
 
-Claude·DeepSeek는 로그에 한도 비율이 없어 토큰 합계만 보여 준다. Claude의 첫 토큰·속도는 메시지 기록 시각 기준 추정값이다.
+## 기능
 
-## 빌드
+- **캡슐**: 마지막 턴의 합계 토큰, 걸린 시간, 모델 속도, 생성 속도를 보여 준다. 여러 모델을 함께 쓰면 최근 15분 안에 쓴 모델마다 한 줄씩 표시한다.
+- **클릭**: 마지막 턴의 입력(새로·캐시 읽기·캐시 쓰기), 출력, 생각 토큰과 첫 토큰까지·도구 실행 시간을 펼친다.
+- **Ctrl을 누른 채 마우스 올리기**: 아래 두 가지가 나온다.
+  - 주간 사용량: Codex 5시간·주간 한도 %와 초기화까지 남은 시간, Claude 7일·오늘 토큰, Codex·DeepSeek 7일 토큰.
+  - 최근 턴 8개.
+- **메뉴 막대 아이콘**: 아래 설정을 바꿀 수 있다.
+  - 표시 시점: 항상 표시 / Claude·Codex·Qoder 앱 사용 중일 때만
+  - 보기 방식: 모델별로 보기 / 최근 턴 하나만
+  - 속도 줄 켜기·끄기, 로그인 시 자동 실행, 위치 초기화
+- 캡슐은 드래그해서 옮길 수 있고 위치를 기억한다. 모든 Space와 전체 화면 위에 뜬다.
 
-```
+## 속도 두 가지
+
+한 턴은 보통 `첫 토큰 대기 → 글 쓰기 → 도구 실행 → 글 쓰기 …` 순서로 흘러간다.
+
+| 표시 | 계산 | 쓰임 |
+|---|---|---|
+| **모델** | 출력 토큰 ÷ (전체 시간 − 도구 실행 시간) | 모델끼리 비교할 때. 세 소스 모두 같은 기준으로 계산된다 |
+| **생성** | 출력 토큰 ÷ (전체 시간 − 도구 실행 − 첫 토큰 대기) | 순수 생성 속도. 모델 속도와 차이가 크면 첫 응답 대기가 길었다는 뜻 |
+
+생성 속도는 Codex에서 가장 정확하다. 로그에 첫 토큰 시간이 있기 때문이다.
+
+- **Claude Code**: 응답이 기록된 시각으로 첫 토큰 시간을 추정하므로 생성 속도가 다소 높게 나올 수 있다.
+- **DeepSeek 워커**: 첫 토큰 시간이 없어서 `—`로 표시한다.
+
+평소에는 **모델 속도**를 보는 것을 권장한다.
+
+## 설치
+
+필요한 것: Apple Silicon Mac, macOS 14 이상, Xcode Command Line Tools(`xcode-select --install`). Xcode 본체는 필요 없다.
+
+```sh
+git clone https://github.com/kritikal619/TokenCapsule.git
+cd TokenCapsule
 ./build.sh
+open ~/Applications/TokenCapsule.app
 ```
 
-`~/Applications/TokenCapsule.app`에 설치된다(ad-hoc 서명, Apple Silicon, macOS 14+). Xcode 없이 Command Line Tools의 `swiftc`만 있으면 된다.
+`build.sh`는 `swiftc`로 컴파일하고 ad-hoc 서명한 뒤 `~/Applications/TokenCapsule.app`에 설치한다. 업데이트할 때는 `git pull && ./build.sh` 후 앱을 다시 실행한다.
 
-처음 열 때 Gatekeeper가 막으면 Finder에서 앱을 우클릭 → 열기.
+## 읽는 데이터
 
-## 개발용 도구
+모든 처리는 로컬에서 한다. 네트워크 요청이 없다. **대화 내용, 도구 입력·출력, 답변 텍스트는 읽지 않고** 숫자 사용량·시각·ID만 쓴다. 최근 8일 안에 바뀐 파일만 읽는다. 처음에 한 번 전체를 읽고, 그 뒤 2초마다 새로 추가된 줄만 읽는다.
 
-- `Tools/check`: 로그를 읽어 최근 턴·한도를 숫자로 출력
-- `Tools/render`: 화면을 PNG로 렌더링 (`swiftc ... Sources/Logs.swift Sources/UI.swift Tools/render/main.swift`)
+| 소스 | 위치 | 쓰는 값 |
+|---|---|---|
+| Claude Code | `~/.claude/projects/**/*.jsonl` | assistant 메시지의 `usage`, `stop_reason`, 도구 호출·결과 시각. 같은 메시지 id는 한 번만 센다. 서브에이전트 기록은 토큰 합계에만 넣는다 |
+| Codex | `~/.codex/sessions/**/rollout-*.jsonl` | `token_usage_record`, `task_complete`의 `duration_ms`·`time_to_first_token_ms`, `token_count`의 `rate_limits`, 도구 호출·결과 시각 |
+| DeepSeek (Qoder CLI) | `~/.qoder/projects/**/*.jsonl` | Claude Code와 같은 형식 |
+| DeepSeek (Qoder 워커) | `~/.codex/skills/qoder-delegate/usage.jsonl` | 아래 형식의 숫자 기록 |
 
-[TokenOverlay](https://github.com/igayowai/TokenOverlay)(MIT)의 기능 구성을 참고했으며 코드는 새로 작성했다.
+Claude와 DeepSeek는 로그에 한도 비율이 없어서 토큰 합계만 보여 준다.
+
+### Qoder 워커 기록 형식
+
+Qoder를 `qodercli -p --no-session-persistence`로 호출하면 세션 기록이 남지 않는다. 호출하는 쪽(브리지 스크립트 등)이 결과 JSON의 숫자만 한 줄씩 남기면 TokenCapsule이 읽는다. 토큰이 0인 줄(대기열에서 끝났거나 취소된 호출)은 건너뛴다.
+
+```json
+{"timestamp": "2026-10-20T14:10:00.000Z", "model": "DeepSeek-Flash", "mode": "implement",
+ "usage": {"input_tokens": 1200, "cache_read_input_tokens": 3000, "cache_creation_input_tokens": 0, "output_tokens": 800},
+ "duration_ms": 45000, "duration_api_ms": 30000}
+```
+
+도구 실행 시간은 `duration_ms − duration_api_ms`로 계산한다.
+
+## 한계
+
+- 턴이 끝나야 캡슐에 나타난다. 진행 중인 턴은 표시하지 않는다.
+- Claude Code 턴의 경계는 사용자 입력부터 `stop_reason`이 `end_turn` 등으로 끝나는 응답까지다. 중간에 중단한 턴은 다음 입력 때 마무리된다.
+- 토큰 합계에는 캐시 읽기가 포함된다. 그래서 긴 세션에서는 수백만 단위로 커질 수 있다. 출력만 보려면 상세 화면을 본다.
+- 여러 기기 합치기와 자동 업데이트는 없다.
+
+## 개발
+
+```
+Sources/Logs.swift    로그 읽기 (증분 tail, 소스별 파서, 집계)
+Sources/UI.swift      SwiftUI 화면, 오버레이 패널, 메뉴 막대
+Sources/main.swift    앱 시작
+Tools/check           로그를 읽어 최근 턴·한도를 숫자로 출력
+Tools/render          화면을 PNG로 렌더링 (demo 인자를 주면 데모 데이터)
+```
+
+```sh
+# 화면 렌더링 (README 스크린샷)
+mkdir -p build
+swiftc -O -swift-version 5 -target arm64-apple-macos14.0 \
+  Sources/Logs.swift Sources/UI.swift Tools/render/main.swift -o build/render-tool
+./build/render-tool docs/images demo
+```
+
+## 크레딧
+
+Windows용 [TokenOverlay](https://github.com/igayowai/TokenOverlay)(MIT)의 기능 구성을 참고했다. 코드는 새로 작성했다.
+
+## 라이선스
+
+MIT
