@@ -30,6 +30,7 @@ final class Settings: ObservableObject {
 final class Store: ObservableObject {
     @Published var turns: [Turn] = []
     @Published var limits: CodexLimits?
+    @Published var claudeLimits: CodexLimits?
     @Published var claudeWeek = Usage()
     @Published var claudeToday = Usage()
     @Published var codexWeek = Usage()
@@ -55,10 +56,12 @@ final class Store: ObservableObject {
             let snapshot = (scanner.turns, scanner.limits, scanner.claudeUsage(since: week),
                             scanner.claudeUsage(since: today), scanner.codexUsage(since: week), scanner.lastActivity)
             let deepseek = scanner.deepseekUsage(since: week)
+            let claudeLimits = scanner.claudeLimits
             DispatchQueue.main.async {
                 self.turns = snapshot.0; self.limits = snapshot.1; self.claudeWeek = snapshot.2
                 self.claudeToday = snapshot.3; self.codexWeek = snapshot.4; self.lastActivity = snapshot.5
                 self.deepseekWeek = deepseek
+                self.claudeLimits = claudeLimits
                 self.loaded = true
             }
         }
@@ -315,9 +318,17 @@ struct RecentView: View {
         VStack(alignment: .leading, spacing: 8) {
             Card {
                 Text("주간 사용량").font(.system(size: 13, weight: .bold))
+                if let c = store.claudeLimits {
+                    if let p = c.primary { LimitBar(title: "Claude 5시간", window: p, color: Source.claude.color) }
+                    if let s = c.secondary { LimitBar(title: "Claude 주간", window: s, color: Source.claude.color) }
+                    Text("Claude Code 상태줄 기준 · \(Fmt.ago(c.observedAt)) 갱신").font(.system(size: 10)).foregroundStyle(.secondary)
+                } else {
+                    Text("Claude 한도: 설정에서 ‘Claude 한도 연결’을 켜면 표시됩니다.").font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+                Divider()
                 if let l = store.limits {
-                    if let p = l.primary { LimitBar(title: "Codex \(p.windowMinutes / 60)시간", window: p) }
-                    if let s = l.secondary { LimitBar(title: "Codex 주간", window: s) }
+                    if let p = l.primary { LimitBar(title: "Codex \(p.windowMinutes / 60)시간", window: p, color: Source.codex.color) }
+                    if let s = l.secondary { LimitBar(title: "Codex 주간", window: s, color: Source.codex.color) }
                     Text("Codex 기록 기준 · \(Fmt.ago(l.observedAt)) 갱신\(l.plan.map { " · \($0)" } ?? "")")
                         .font(.system(size: 10)).foregroundStyle(.secondary)
                 } else {
@@ -328,7 +339,7 @@ struct RecentView: View {
                 Row(label: "Claude 오늘", value: "\(Fmt.tokens(store.claudeToday.total)) (출력 \(Fmt.tokens(store.claudeToday.output)))")
                 Row(label: "Codex 최근 7일", value: "\(Fmt.tokens(store.codexWeek.total)) (출력 \(Fmt.tokens(store.codexWeek.output)))")
                 Row(label: "DeepSeek 최근 7일", value: "\(Fmt.tokens(store.deepseekWeek.total)) (출력 \(Fmt.tokens(store.deepseekWeek.output)))")
-                Text("Claude·DeepSeek는 로그에 한도 비율이 없어 토큰 합계만 표시합니다.").font(.system(size: 10)).foregroundStyle(.secondary)
+                Text("DeepSeek는 로그에 한도 비율이 없어 토큰 합계만 표시합니다.").font(.system(size: 10)).foregroundStyle(.secondary)
             }
             Card {
                 Text("최근 턴").font(.system(size: 13, weight: .bold))
@@ -350,7 +361,7 @@ struct RecentView: View {
 }
 
 struct LimitBar: View {
-    let title: String; let window: RateWindow
+    let title: String; let window: RateWindow; var color: Color = Source.codex.color
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack {
@@ -361,7 +372,7 @@ struct LimitBar: View {
             GeometryReader { g in
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.primary.opacity(0.12))
-                    Capsule().fill(window.usedPercent >= 80 ? Color.orange : Source.codex.color)
+                    Capsule().fill(window.usedPercent >= 80 ? Color.red.opacity(0.85) : color)
                         .frame(width: g.size.width * min(1, max(0, window.usedPercent / 100)))
                 }
             }.frame(height: 5)
@@ -526,6 +537,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         if let s = store.limits?.secondary { info(menu, String(format: "Codex 주간 %.0f%% 사용 · %@", s.usedPercent, Fmt.reset(s.resetsAt))) }
         if let p = store.limits?.primary { info(menu, String(format: "Codex %d시간 %.0f%% 사용", p.windowMinutes / 60, p.usedPercent)) }
+        if let c = store.claudeLimits {
+            if let s = c.secondary { info(menu, String(format: "Claude 주간 %.0f%% 사용 · %@", s.usedPercent, Fmt.reset(s.resetsAt))) }
+            if let p = c.primary { info(menu, String(format: "Claude 5시간 %.0f%% 사용", p.usedPercent)) }
+        }
         info(menu, "Claude 최근 7일 \(Fmt.tokens(store.claudeWeek.total)) 토큰")
         info(menu, "DeepSeek(Qoder) 최근 7일 \(Fmt.tokens(store.deepseekWeek.total)) 토큰")
         menu.addItem(.separator())
@@ -543,6 +558,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let m = add(menu, "모델 속도 줄 표시", #selector(toggleModel)); m.state = settings.showModelSpeed ? .on : .off
         let g = add(menu, "생성 속도 줄 표시", #selector(toggleGen)); g.state = settings.showGenerationSpeed ? .on : .off
         menu.addItem(.separator())
+        let hook = ClaudeStatusLineHook.state
+        let link = add(menu, hook == .otherCommand ? "Claude 한도 연결 (다른 상태줄 사용 중)" : "Claude 한도 연결 (Claude Code 상태줄)", #selector(toggleClaudeHook))
+        link.state = hook == .installed ? .on : .off
         let login = add(menu, "로그인 시 자동 실행", #selector(toggleLogin)); login.state = SMAppService.mainApp.status == .enabled ? .on : .off
         add(menu, "지금 새로 읽기", #selector(refresh))
         menu.addItem(.separator())
@@ -567,6 +585,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc func resetPosition() { overlay.resetPosition() }
     @objc func refresh() { store.refresh() }
     @objc func quit() { NSApp.terminate(nil) }
+    @objc func toggleClaudeHook() {
+        let alert = NSAlert()
+        do {
+            switch ClaudeStatusLineHook.state {
+            case .installed:
+                try ClaudeStatusLineHook.uninstall()
+                return
+            case .otherCommand:
+                alert.messageText = "이미 다른 상태줄을 쓰고 있습니다"
+                alert.informativeText = "~/.claude/settings.json의 statusLine을 TokenCapsule로 바꾸면 기존 상태줄은 표시되지 않습니다. 바꿀까요? (바꾸기 전에 설정 파일을 백업합니다)"
+                alert.addButton(withTitle: "바꾸기"); alert.addButton(withTitle: "취소")
+                guard alert.runModal() == .alertFirstButtonReturn else { return }
+            case .none:
+                break
+            }
+            try ClaudeStatusLineHook.install()
+            let done = NSAlert()
+            done.messageText = "Claude 한도 연결됨"
+            done.informativeText = "Claude Code가 상태줄을 그릴 때 5시간·주간 한도가 TokenCapsule에 전달됩니다. 다음 응답부터 표시됩니다. (Claude 구독 계정에서만 제공)"
+            done.runModal()
+        } catch {
+            alert.messageText = "설정 변경 실패"; alert.informativeText = error.localizedDescription; alert.runModal()
+        }
+    }
+
     @objc func toggleLogin() {
         do {
             if SMAppService.mainApp.status == .enabled { try SMAppService.mainApp.unregister() }

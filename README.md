@@ -16,10 +16,11 @@ macOS 메뉴 막대(상단바) 앱. Claude Code, Codex, DeepSeek(Qoder)의 **마
 - **아이콘 클릭 → 패널**:
   - 위쪽: 모델별 마지막 턴. 최근 15분 안에 쓴 모델마다 한 줄씩 합계 토큰, 걸린 시간, 모델·생성 속도를 보여 준다.
   - **이번 턴** 탭: 입력(새로·캐시 읽기·캐시 쓰기), 출력, 생각 토큰과 첫 토큰까지·도구 실행 시간.
-  - **주간·기록** 탭: Codex 5시간·주간 한도 %와 초기화까지 남은 시간, Claude 7일·오늘 토큰, Codex·DeepSeek 7일 토큰, 최근 턴 8개.
+  - **주간·기록** 탭: Claude·Codex 5시간·주간 한도 %와 초기화까지 남은 시간, Claude 7일·오늘 토큰, Codex·DeepSeek 7일 토큰, 최근 턴 8개.
 - **우클릭(또는 패널의 ⚙︎) → 설정**:
   - 모델별로 보기 / 최근 턴 하나만 보기
   - 모델·생성 속도 줄 켜기·끄기
+  - Claude 한도 연결 (아래 참고)
   - 로그인 시 자동 실행
   - 화면 위 캡슐 띄우기(선택)
 - **화면 위 캡슐(선택, 기본 꺼짐)**: TokenOverlay처럼 화면 위에 작은 캡슐을 띄운다. 클릭하면 이번 턴이, Ctrl을 누른 채 올리면 주간 사용량이 펼쳐진다. 드래그로 옮길 수 있다. 항상 표시하거나 Claude·Codex·Qoder 앱 사용 중일 때만 표시할 수 있다.
@@ -66,7 +67,15 @@ open ~/Applications/TokenCapsule.app
 | DeepSeek (Qoder CLI) | `~/.qoder/projects/**/*.jsonl` | Claude Code와 같은 형식 |
 | DeepSeek (Qoder 워커) | `~/.codex/skills/qoder-delegate/usage.jsonl` | 아래 형식의 숫자 기록 |
 
-Claude와 DeepSeek는 로그에 한도 비율이 없어서 토큰 합계만 보여 준다.
+DeepSeek는 로그에 한도 비율이 없어서 토큰 합계만 보여 준다.
+
+### Claude 5시간·주간 한도
+
+Claude Code의 대화 기록에는 한도가 없지만, Claude Code는 상태줄(status line) 명령에 `rate_limits`를 넘겨준다. 내용은 5시간·7일 사용률과 초기화 시각이고, Claude 구독 계정에서만 나온다. 설정 메뉴의 **Claude 한도 연결**을 켜면 TokenCapsule이 `~/.claude/settings.json`의 `statusLine`에 자기 자신(`TokenCapsule --statusline`)을 등록한다. 등록 전에 설정 파일을 `settings.json.tokencapsule-backup-*`로 백업한다.
+
+- 상태줄이 그려질 때마다 한도 숫자만 `~/Library/Application Support/TokenCapsule/claude-limits.json`에 저장하고, 상태줄에는 `Claude 5h 24% · 주간 41%`처럼 표시한다. 인증 정보는 읽지 않는다.
+- 이미 다른 상태줄을 쓰고 있으면 바꿀지 먼저 묻는다. 끄면 `statusLine` 항목을 지운다.
+- 상태줄을 그리는 Claude Code(터미널 등)에서 응답을 받아야 갱신된다. 마지막 갱신 시각이 함께 표시된다.
 
 ### Qoder 워커 기록 형식
 

@@ -340,6 +340,7 @@ final class LogScanner {
     private var deepseekSamples: [String: (Date, Usage)] = [:]
     private(set) var turns: [Turn] = []
     private(set) var limits: CodexLimits?
+    private(set) var claudeLimits: CodexLimits?
     private(set) var lastActivity: Date?
     private let lookback: TimeInterval = 8 * 86400
 
@@ -387,6 +388,7 @@ final class LogScanner {
             turns = byId.values.filter { $0.end >= cutoff }.sorted { $0.end > $1.end }
             if let latest = turns.first?.end, latest > (lastActivity ?? .distantPast) { lastActivity = latest }
         }
+        claudeLimits = ClaudeLimitsFile.read()
         claudeSamples = claudeSamples.filter { $0.value.0 >= cutoff }
         deepseekSamples = deepseekSamples.filter { $0.value.0 >= cutoff }
     }
@@ -414,5 +416,96 @@ final class LogScanner {
             if v?.isRegularFile == true, (v?.contentModificationDate ?? .distantPast) >= cutoff { out.append(url) }
         }
         return out
+    }
+}
+
+// MARK: - Claude subscription limits (via Claude Code status line)
+
+/// Claude Code passes `rate_limits` (5-hour / 7-day used % and reset time) to its status-line
+/// command. TokenCapsule registers itself as that command (`--statusline`), keeps only those
+/// numbers in a small file, and prints a short status line back.
+enum ClaudeLimitsFile {
+    static var url: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/TokenCapsule/claude-limits.json")
+    }
+
+    /// Status-line mode: stdin is Claude Code's JSON; stdout is the line it displays.
+    static func captureFromStatusLine() {
+        let data = FileHandle.standardInput.readDataToEndOfFile()
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let limits = obj["rate_limits"] as? [String: Any] else { return }
+        var saved: [String: Any] = ["observed_at": Date().timeIntervalSince1970]
+        for key in ["five_hour", "seven_day"] {
+            guard let w = limits[key] as? [String: Any], let used = (w["used_percentage"] as? NSNumber)?.doubleValue else { continue }
+            var entry: [String: Any] = ["used_percentage": used]
+            if let reset = (w["resets_at"] as? NSNumber)?.doubleValue { entry["resets_at"] = reset }
+            saved[key] = entry
+        }
+        guard saved.count > 1, let out = try? JSONSerialization.data(withJSONObject: saved) else { return }
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? out.write(to: url, options: .atomic)
+        var parts: [String] = []
+        if let f = saved["five_hour"] as? [String: Any], let p = f["used_percentage"] as? Double { parts.append(String(format: "5h %.0f%%", p)) }
+        if let s = saved["seven_day"] as? [String: Any], let p = s["used_percentage"] as? Double { parts.append(String(format: "주간 %.0f%%", p)) }
+        if !parts.isEmpty { print("Claude " + parts.joined(separator: " · ")) }
+    }
+
+    static func read() -> CodexLimits? {
+        guard let data = try? Data(contentsOf: url),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let observed = (obj["observed_at"] as? NSNumber)?.doubleValue else { return nil }
+        func window(_ key: String, _ minutes: Int) -> RateWindow? {
+            guard let w = obj[key] as? [String: Any], let used = (w["used_percentage"] as? NSNumber)?.doubleValue else { return nil }
+            let reset = (w["resets_at"] as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue) }
+            return RateWindow(usedPercent: used, windowMinutes: minutes, resetsAt: reset)
+        }
+        return CodexLimits(primary: window("five_hour", 300), secondary: window("seven_day", 10_080), plan: nil,
+                           observedAt: Date(timeIntervalSince1970: observed))
+    }
+}
+
+/// Adds or removes TokenCapsule as Claude Code's status-line command in ~/.claude/settings.json.
+enum ClaudeStatusLineHook {
+    enum State { case installed, otherCommand, none }
+    static var settingsURL: URL { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude/settings.json") }
+    static var command: String { "\"\(Bundle.main.executablePath ?? "")\" --statusline" }
+
+    private static func load() -> [String: Any] {
+        guard let data = try? Data(contentsOf: settingsURL),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
+        return obj
+    }
+
+    static var state: State {
+        guard let line = load()["statusLine"] as? [String: Any] else { return .none }
+        let cmd = line["command"] as? String ?? ""
+        return cmd.contains("TokenCapsule") && cmd.contains("--statusline") ? .installed : .otherCommand
+    }
+
+    private static func save(_ obj: [String: Any]) throws {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: settingsURL.path) {
+            let stamp = Int(Date().timeIntervalSince1970)
+            let backup = settingsURL.deletingLastPathComponent().appendingPathComponent("settings.json.tokencapsule-backup-\(stamp)")
+            try fm.copyItem(at: settingsURL, to: backup)
+        } else {
+            try fm.createDirectory(at: settingsURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        }
+        let data = try JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .withoutEscapingSlashes, .sortedKeys])
+        try data.write(to: settingsURL, options: .atomic)
+    }
+
+    static func install() throws {
+        var obj = load()
+        obj["statusLine"] = ["type": "command", "command": command, "padding": 0]
+        try save(obj)
+    }
+
+    static func uninstall() throws {
+        guard state == .installed else { return }
+        var obj = load()
+        obj.removeValue(forKey: "statusLine")
+        try save(obj)
     }
 }
